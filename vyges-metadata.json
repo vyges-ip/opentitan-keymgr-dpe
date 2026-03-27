@@ -3,26 +3,242 @@
   "x-version": "1.0.0",
   "name": "opentitan-keymgr-dpe",
   "version": "0.1.0",
-  "description": "DICE Protection Environment (DPE) variant of key manager with enhanced DPA resistance, hardware key derivation via KMAC, and key distribution to AES/KMAC/OTBN. TileLink-UL slave. Extracted from OpenTitan (lowRISC).",
+  "description": "Key manager for secure key generation, lifecycle enforcement, and cryptographic operations, integrated with KMAC and PRNG interfaces.",
   "license": "Apache-2.0",
   "maturity": "production",
-  "target": ["asic", "fpga"],
-  "design_type": ["digital"],
-  "created": "2026-02-19T06:12:02Z",
-  "updated": "2026-03-27T19:30:00Z",
-  "source": {"type": "git", "url": "https://github.com/lowRISC/opentitan", "commit": "304378684dfcf5be73bbd14faffa71790793d8c6", "ip_path": "hw/ip/keymgr-dpe", "private": false, "rtl_path": "rtl"},
-  "maintainers": [{"name": "Vyges", "email": "team@vyges.com", "github": "vyges"}],
-  "interfaces": [
-    {"type": "bus", "direction": "slave", "protocol": "TL-UL", "port": "tl", "width": 32, "description": "TileLink-UL slave. 54 registers."}
+  "target": [
+    "asic",
+    "fpga"
   ],
-  "architecture": {"type": "peripheral", "features": ["DICE Protection Environment (DPE) compliant key derivation", "Enhanced DPA resistance (KmacEnMasking)", "Key distribution to AES, KMAC, OTBN", "OTP seed interface for device-unique keys", "EDN entropy for key generation", "Lifecycle-aware state machine", "54 configuration registers", "Bus integrity alert"]},
-  "dependencies": [{"name": "opentitan-prim", "type": "library"}, {"name": "opentitan-tlul", "type": "bus"}],
-  "documentation": {"upstream": "https://opentitan.org/book/hw/ip/keymgr-dpe/"},
-  "artifacts": {"total_rtl_lines": 5946},
-  "categories": {"primary": "security", "secondary": ["crypto"], "tags": ["keymgr-dpe", "opentitan", "tl-ul", "crypto"]},
-  "trust": {"verification_level": "silicon_proven", "tapeout_count": 3, "fpga_validated": false, "maintained": true, "last_activity": "2026-03-27"},
-  "asic": {"flavor": "digital", "technology": ["sky130A"]},
-  "fpga": {"toolchain": ["Vivado", "Yosys"]},
-  "keywords": ["keymgr-dpe", "opentitan", "crypto", "tl-ul"],
-  "meta": {"template": {"generator": "manual (gold-standard pass 2026-03-27)"}, "schema": {"version": "1.0.0"}}
+  "design_type": [
+    "digital"
+  ],
+  "created": "2026-03-27T23:05:15Z",
+  "updated": "2026-03-27T23:05:15Z",
+  "source": {
+    "type": "git",
+    "url": "https://github.com/lowRISC/opentitan",
+    "commit": "7fbd85829ec6354ef6497df69536cefe862c1f5a",
+    "ip_path": "hw/ip/keymgr_dpe",
+    "private": false,
+    "containsEncryptedPayload": false,
+    "indexing": true
+  },
+  "maintainers": [
+    {
+      "name": "Vyges",
+      "email": "team@vyges.com",
+      "url": "https://vyges.com",
+      "github": "vyges"
+    }
+  ],
+  "interfaces": [
+    {
+      "type": "clock",
+      "direction": "input",
+      "protocol": "generic",
+      "port": "clk_i",
+      "width": 1,
+      "description": "Clock input for synchronous operation."
+    },
+    {
+      "type": "reset",
+      "direction": "input",
+      "protocol": "generic",
+      "port": "rst_ni",
+      "width": 1,
+      "description": "Active-low reset input."
+    },
+    {
+      "type": "bus",
+      "direction": "input",
+      "protocol": "generic",
+      "port": "op_start_i",
+      "width": 1,
+      "description": "Operation start signal."
+    },
+    {
+      "type": "bus",
+      "direction": "input",
+      "protocol": "generic",
+      "port": "op_i",
+      "width": 3,
+      "description": "Operation type selector."
+    },
+    {
+      "type": "bus",
+      "direction": "input",
+      "protocol": "generic",
+      "port": "slot_src_sel_i",
+      "width": 3,
+      "description": "Source slot selector."
+    },
+    {
+      "type": "bus",
+      "direction": "input",
+      "protocol": "generic",
+      "port": "slot_dst_sel_i",
+      "width": 3,
+      "description": "Destination slot selector."
+    },
+    {
+      "type": "bus",
+      "direction": "output",
+      "protocol": "generic",
+      "port": "op_done_o",
+      "width": 1,
+      "description": "Operation completion signal."
+    },
+    {
+      "type": "bus",
+      "direction": "output",
+      "protocol": "generic",
+      "port": "status_o",
+      "width": 3,
+      "description": "Operation status output."
+    },
+    {
+      "type": "bus",
+      "direction": "output",
+      "protocol": "generic",
+      "port": "error_o",
+      "width": 8,
+      "description": "Error status output."
+    },
+    {
+      "type": "bus",
+      "direction": "output",
+      "protocol": "generic",
+      "port": "fault_o",
+      "width": 8,
+      "description": "Fault status output."
+    },
+    {
+      "type": "bus",
+      "direction": "input",
+      "protocol": "generic",
+      "port": "kmac_data_i",
+      "width": 512,
+      "description": "KMAC data input."
+    },
+    {
+      "type": "bus",
+      "direction": "input",
+      "protocol": "generic",
+      "port": "entropy_i",
+      "width": 256,
+      "description": "Entropy input for PRNG."
+    }
+  ],
+  "parameters": [
+    {
+      "name": "DpeNumSlots",
+      "type": "int",
+      "default": 8,
+      "description": "Number of key slots available."
+    },
+    {
+      "name": "DpeNumSlotsWidth",
+      "type": "int",
+      "default": 3,
+      "description": "Bit-width for slot indexing."
+    },
+    {
+      "name": "DpeAdvDataWidth",
+      "type": "int",
+      "default": 512,
+      "description": "Width of data for advance operations."
+    },
+    {
+      "name": "StateWidth",
+      "type": "int",
+      "default": 10,
+      "description": "Width of state encoding."
+    }
+  ],
+  "performance": {},
+  "architecture": {
+    "type": "peripheral",
+    "features": [
+      "Secure key generation",
+      "Lifecycle enforcement",
+      "KMAC integration",
+      "PRNG support",
+      "Fault detection and handling"
+    ]
+  },
+  "asic": {
+    "flavor": "digital",
+    "technology": [
+      "sky130A"
+    ]
+  },
+  "fpga": {
+    "toolchain": [
+      "Vivado"
+    ],
+    "devices": [
+      "Artix-7"
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "prim_util_pkg",
+      "type": "library",
+      "description": "Utility package for primitive operations."
+    },
+    {
+      "name": "otp_ctrl_pkg",
+      "type": "library",
+      "description": "OTP control package for device ID and diversification values."
+    },
+    {
+      "name": "lc_ctrl_pkg",
+      "type": "library",
+      "description": "Lifecycle control package for lifecycle state management."
+    }
+  ],
+  "test": {
+    "testbenches": [],
+    "status": "upstream_passing",
+    "coverage": "functional"
+  },
+  "documentation": {
+    "upstream": "https://github.com/lowRISC/opentitan"
+  },
+  "artifacts": {
+    "total_rtl_lines": 5946
+  },
+  "categories": [
+    {
+      "main_category": "Security IP",
+      "sub_category": "Secure Boot Blocks"
+    }
+  ],
+  "keywords": [
+    "key management",
+    "security",
+    "cryptography",
+    "OpenTitan",
+    "KMAC",
+    "PRNG"
+  ],
+  "trust": {
+    "verification_level": "silicon_proven",
+    "tapeout_count": 0,
+    "fpga_validated": false,
+    "formal_verified": false,
+    "maintained": true,
+    "last_activity": "2026-03-27"
+  },
+  "meta": {
+    "template": {
+      "generator": "github-models-ai",
+      "template_version": "1.0.0",
+      "generated_at": "2026-03-27T23:05:15Z"
+    },
+    "schema": {
+      "version": "1.0.0"
+    }
+  }
 }
