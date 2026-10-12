@@ -284,6 +284,24 @@ module keymgr_dpe
   logic key_version_vld;
   logic dest_sel_oob;
 
+  keymgr_dpe_metadata_slot_t [NumInstHwSlot-1:0] metadata;
+  for (genvar i = 0; i < NumMaxHwSlot; i++) begin : gen_metadata_read_data
+    if (i < NumInstHwSlot) begin : gen_inst_slot
+      assign hw2reg.metadata_high[i].valid.d                = metadata[i].valid;
+      assign hw2reg.metadata_high[i].exportable_policy.d    = metadata[i].key_policy.exportable;
+      assign hw2reg.metadata_high[i].retain_parent_policy.d = metadata[i].key_policy.retain_parent;
+      assign hw2reg.metadata_high[i].allow_child_policy.d   = metadata[i].key_policy.allow_child;
+      assign hw2reg.metadata_high[i].boot_stage.d           = metadata[i].boot_stage;
+      assign hw2reg.metadata_low[i].d                       = metadata[i].max_key_version;
+    end else begin : gen_tieoff_slot
+      assign hw2reg.metadata_high[i].valid.d                = '0;
+      assign hw2reg.metadata_high[i].exportable_policy.d    = '0;
+      assign hw2reg.metadata_high[i].retain_parent_policy.d = '0;
+      assign hw2reg.metadata_high[i].allow_child_policy.d   = '0;
+      assign hw2reg.metadata_high[i].boot_stage.d           = '0;
+      assign hw2reg.metadata_low[i].d                       = '0;
+    end
+  end
 
   for (genvar i = 0; i < Shares; i++) begin : gen_truncate_data
     assign kmac_data_truncated[i] = kmac_data[i][KeyWidth-1:0];
@@ -307,6 +325,7 @@ module keymgr_dpe
   logic op_start;
   assign op_start = reg2hw.start.q;
   logic invalid_advance;
+  mubi4_t enforce_sw_binding_err;
 
   // TODO(#30682): Remove this assertion
   // Raise an assertion if the source / destination field provided by the
@@ -356,9 +375,11 @@ module keymgr_dpe
     .slot_src_sel_i(slot_src_sel_trunc),
     .slot_dst_sel_i(slot_dst_sel_trunc),
     .slot_policy_i(keymgr_dpe_policy_t'(reg2hw.slot_policy)),
+    .enforce_sw_binding_err_i(enforce_sw_binding_err),
     .max_key_version_i(reg2hw.max_key_ver_shadowed),
     .key_version_i(reg2hw.key_version),
     .key_version_vld_o(key_version_vld),
+    .metadata_o(metadata),
     .op_start_i(op_start),
     .op_done_o(op_done),
     .init_o(init),
@@ -556,7 +577,8 @@ module keymgr_dpe
     adv_matrix = {(2 ** DpeBootStagesWidth){DpeAdvDataWidth'(sw_binding)}};
     adv_dvalid = {(2 ** DpeBootStagesWidth){1'b1}};
 
-    if (reg2hw.control_shadowed.sw_binding_only.q == 1'b0) begin
+    if ((reg2hw.control_shadowed.sw_binding_only.q == 1'b0) &&
+        mubi4_test_false_strict(mubi4_t'(reg2hw.enforce_sw_binding.q))) begin
       // For (0 = Creator) / (1 = OwnerInt) / (2 = Owner), check seed validity
       adv_matrix[BootStageCreator] = adv_data_creator;
       adv_dvalid[BootStageCreator] = adv_data_creator_valid;
@@ -566,6 +588,33 @@ module keymgr_dpe
       adv_dvalid[BootStageOwner] = owner_seed_vld;
     end
   end
+
+  // Indicates if the advance operation will consume HW binding value
+  mubi4_t adv_consumes_hw_binding;
+  assign adv_consumes_hw_binding = mubi4_bool_to_mubi(
+      !reg2hw.control_shadowed.sw_binding_only.q &
+      (active_key_slot.boot_stage < BootStageRuntime));
+
+  // Raise a `invalid_op` error if `enforce_sw_binding` is active but the option
+  // is not set in the control register. Only boot stages that consume HW binding
+  // values are checked, as later stages use the SW binding only anyway.
+
+  // Truth table of `enforce_sw_binding_err` (Invalid = any encoding other than True / False):
+  //
+  // | # | enforce_sw_... | adv_consumes_... | enforce_sw_binding_err     | mubi4_test_true_loose |
+  // |---|----------------|------------------|----------------------------|-----------------------|
+  // | 1 | True           | True             | True                       | 1                     |
+  // | 2 | True           | False            | False                      | 0                     |
+  // | 3 | True           | Invalid          | Invalid (= consumes value) | 1                     |
+  // | 4 | False          | True             | False                      | 0                     |
+  // | 5 | False          | False            | False                      | 0                     |
+  // | 6 | False          | Invalid          | False                      | 0                     |
+  // | 7 | Invalid        | True             | Invalid (= enforce value)  | 1                     |
+  // | 8 | Invalid        | False            | False                      | 0                     |
+
+  // SEC_CM: ENFORCE_SW_BINDING.CTRL.CONSISTENCY, ENFORCE_SW_BINDING.CTRL.MUBI
+  assign enforce_sw_binding_err = mubi4_and_hi(
+      mubi4_t'(reg2hw.enforce_sw_binding.q), adv_consumes_hw_binding);
 
   // Generate output operation input construction
   logic [KeyWidth-1:0] output_key;
@@ -939,6 +988,9 @@ module keymgr_dpe
 
   // Verify supported number of boot stage
   `ASSERT_INIT(InvalidNumOfBootStage_A, NumBootStages inside {2, 3})
+
+  // Verify the metadata do not exceed the width of the sw registers
+  `ASSERT_INIT(MetadataExceedSwReg_A, $bits(keymgr_dpe_metadata_slot_t) <= 2*top_pkg::TL_DW)
 
   // Verify the number of instanciated HW slots
   `ASSERT_INIT(InvalidNumHwSlot_A, NumInstHwSlot <= NumMaxHwSlot)
