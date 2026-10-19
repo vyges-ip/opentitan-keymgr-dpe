@@ -291,6 +291,7 @@ module keymgr_dpe
       assign hw2reg.metadata_high[i].exportable_policy.d    = metadata[i].key_policy.exportable;
       assign hw2reg.metadata_high[i].retain_parent_policy.d = metadata[i].key_policy.retain_parent;
       assign hw2reg.metadata_high[i].allow_child_policy.d   = metadata[i].key_policy.allow_child;
+      assign hw2reg.metadata_high[i].allow_keygen_policy.d  = metadata[i].key_policy.allow_keygen;
       assign hw2reg.metadata_high[i].boot_stage.d           = metadata[i].boot_stage;
       assign hw2reg.metadata_low[i].d                       = metadata[i].max_key_version;
     end else begin : gen_tieoff_slot
@@ -298,6 +299,7 @@ module keymgr_dpe
       assign hw2reg.metadata_high[i].exportable_policy.d    = '0;
       assign hw2reg.metadata_high[i].retain_parent_policy.d = '0;
       assign hw2reg.metadata_high[i].allow_child_policy.d   = '0;
+      assign hw2reg.metadata_high[i].allow_keygen_policy.d  = '0;
       assign hw2reg.metadata_high[i].boot_stage.d           = '0;
       assign hw2reg.metadata_low[i].d                       = '0;
     end
@@ -369,7 +371,7 @@ module keymgr_dpe
     .prng_en_o(ctrl_lfsr_en),
     .entropy_i(ctrl_rand),
     .op_i(keymgr_dpe_ops_e'(reg2hw.control_shadowed.operation.q)),
-    .load_key_lock_i(reg2hw.load_key_lock.q),
+    .load_root_key_lock_i(reg2hw.load_root_key_lock.q),
     // TODO(#384): Add assertions to check that we are not losing some bits by casting
     // slot_src/dst_sel bits to enum type
     .slot_src_sel_i(slot_src_sel_trunc),

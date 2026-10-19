@@ -36,7 +36,7 @@ module keymgr_dpe_ctrl
   // Software interface
   input op_start_i,
   input keymgr_dpe_ops_e op_i,
-  input load_key_lock_i,
+  input load_root_key_lock_i,
   input [NumInstHwSlotWidth-1:0] slot_src_sel_i,
   input [NumInstHwSlotWidth-1:0] slot_dst_sel_i,
   input keymgr_dpe_policy_t slot_policy_i,
@@ -186,7 +186,7 @@ module keymgr_dpe_ctrl
   // error definition
   // check incoming kmac data validity
   // Only check during the periods when there is actual kmac output
-  assign invalid_kmac_out = (op_update | op_ack) &
+  assign invalid_kmac_out = (op_update | op_ack) & kmac_done_i &
                             (~valid_data_chk(kmac_data_i[0]) |
                             ~valid_data_chk(kmac_data_i[1]));
 
@@ -331,8 +331,9 @@ module keymgr_dpe_ctrl
         end
       end
 
-      // `SlotLoadRoot` is used only once after reset, and it allows keymgr_DPE to store the root
-      // secret (UDS) that comes from peripheral OTP port.
+      // `SlotLoadRoot` is used when the state transitions from `Reset` to `Available` or when
+      // explicitly invoked by the `Load root key` operation. This allows the keymgr_dpe to store
+      // the root_key (provided by the otp) into the selected destination slot.
       SlotLoadRoot: begin
         key_slots_d[slot_dst_sel_i].valid = 1;
         key_slots_d[slot_dst_sel_i].boot_stage = BootStageCreator;
@@ -708,13 +709,14 @@ module keymgr_dpe_ctrl
 
   assign invalid_erase = erase_req & ~destination_slot_valid;
 
-  assign invalid_gen = gen_req & (~active_key_slot_o.valid |
-                                  ~key_version_vld_o |
+  assign invalid_gen = gen_req & (~active_key_slot_o.valid         |
+                                  ~active_slot_policy.allow_keygen |
+                                  ~key_version_vld_o               |
                                   dest_sel_oob_i);
 
   assign invalid_load = load_req & (~root_key_i.valid      |
                                     destination_slot_valid |
-                                    load_key_lock_i);
+                                    load_root_key_lock_i);
 
   // This is similar to `invalid_advance` except that it does not depend on a incoming request.
   // The outer module uses `invalid_advance_o` to invalidate KMAC msg payload, when the advance
