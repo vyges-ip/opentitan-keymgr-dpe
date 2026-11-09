@@ -16,7 +16,7 @@ module keymgr_dpe_ctrl
   parameter int unsigned NumInstHwSlot = 4,
   parameter int unsigned NumInstHwSlotWidth = 2,
   // Number of available boot stages
-  parameter int unsigned NumBootStages = 3
+  parameter int unsigned NumBootStages = 4
 ) (
   input clk_i,
   input rst_ni,
@@ -32,6 +32,7 @@ module keymgr_dpe_ctrl
   input reseed_cnt_err_i,
   input sideload_sel_err_i,
   input sideload_fsm_err_i,
+  input kdf_engine_mubi_err_i,
 
   // Software interface
   input op_start_i,
@@ -304,15 +305,16 @@ module keymgr_dpe_ctrl
   assign destination_slot_valid = key_slots_q[slot_dst_sel_i].valid;
 
   // Determine the boot stage for the next DPE context derivation.
-  // If there are only two boot stages, BootStageOwnerInt will be omitted
+  // If there are only two boot stages, BootStageCreatorInt and BootStageOwnerInt will be omitted
   keymgr_dpe_boot_stage_e next_boot_stage;
   if (NumBootStages == 2) begin : gen_two_boot_stage
     assign next_boot_stage =
         (active_key_slot_o.boot_stage == BootStageCreator) ? BootStageOwner :
         BootStageRuntime;
-  end else begin : gen_three_boot_stage
+  end else begin : gen_four_boot_stage
     assign next_boot_stage =
-        (active_key_slot_o.boot_stage == BootStageCreator) ? BootStageOwnerInt :
+        (active_key_slot_o.boot_stage == BootStageCreator) ? BootStageCreatorInt :
+        (active_key_slot_o.boot_stage == BootStageCreatorInt) ? BootStageOwnerInt :
         (active_key_slot_o.boot_stage == BootStageOwnerInt) ? BootStageOwner :
         BootStageRuntime;
   end
@@ -452,6 +454,7 @@ module keymgr_dpe_ctrl
   logic invalid_gen;
   logic invalid_load;
   logic invalid_secondary_load;
+  logic invalid_kdf_engine;
   // TODO(#384): Make sure that:
   // 1) inv_state is correctly computed
   // 2) inv_state is correctly consumed by FSM
@@ -734,6 +737,7 @@ module keymgr_dpe_ctrl
   assign invalid_advance = adv_req & (invalid_allow_child    |
                                       invalid_src_slot       |
                                       invalid_retain_parent  |
+                                      invalid_kdf_engine     |
                                       enforce_sw_binding_err |
                                       slot_src_sel_oob_i     |
                                       slot_dst_sel_oob_i);
@@ -741,7 +745,8 @@ module keymgr_dpe_ctrl
   assign invalid_erase = erase_req & (~destination_slot_valid |
                                       slot_dst_sel_oob_i);
 
-  assign invalid_gen = gen_req & (~active_key_slot_o.valid         |
+  assign invalid_gen = gen_req & (invalid_src_slot                 |
+                                  invalid_kdf_engine               |
                                   ~active_slot_policy.allow_keygen |
                                   ~key_version_vld_o               |
                                   dest_sel_oob_i                   |
@@ -757,6 +762,9 @@ module keymgr_dpe_ctrl
                                                         load_secondary_root_key_lock_i |
                                                         slot_dst_sel_oob_i);
 
+  // Reject advance and generate if SW committed an invalid mubi value to KDF_ENGINE_SHADOWED.
+  assign invalid_kdf_engine = (adv_req | gen_req) & kdf_engine_mubi_err_i;
+
   // This is similar to `invalid_advance` except that it does not depend on a incoming request.
   // The outer module uses `invalid_advance_o` to invalidate KMAC msg payload, when the advance
   // operation is not valid. It is better be loose here and ask to invalidate even when there is no
@@ -764,6 +772,7 @@ module keymgr_dpe_ctrl
   assign invalid_advance_o = invalid_allow_child    |
                              invalid_src_slot       |
                              invalid_retain_parent  |
+                             invalid_kdf_engine     |
                              enforce_sw_binding_err |
                              slot_src_sel_oob_i     |
                              slot_dst_sel_oob_i;
@@ -837,8 +846,17 @@ module keymgr_dpe_ctrl
                              (SyncFaultLastIdx + AsyncFaultLastIdx))
 
   // verify supported number of boot stage
-  `ASSERT_INIT(InvalidNumOfBootStage_A, NumBootStages inside {2, 3})
+  `ASSERT_INIT(InvalidNumOfBootStage_A, NumBootStages inside {2, 4})
 
+  // Verify no invalid values on the boot_stage counter
+  for (genvar i = 0; i < NumInstHwSlot; i++) begin : gen_boot_stage_asserts
+    `ASSERT(ValidBootStage_A, key_slots_q[i].boot_stage <= BootStageRuntime)
+    // BootStageCreatorInt and BootStageOwnerInt are omitted in the two-stage configuration
+    if (NumBootStages == 2) begin : gen_two_boot_stage_asserts
+      `ASSERT(ValidBootStageTwoStage_A,
+              !(key_slots_q[i].boot_stage inside {BootStageCreatorInt, BootStageOwnerInt}))
+    end
+  end
 
   // // stage select should always be Disable whenever it is not enabled
   // `ASSERT(StageDisableSel_A, !en_i |-> stage_sel_o == Disable)
